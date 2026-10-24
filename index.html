@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Конденсатори — SPA</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+        h1 { margin-top: 2rem; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+        th, td { border: 1px solid #999; padding: 6px 10px; text-align: left; vertical-align: middle; }
+        th { background: #e8ecf5; }
+        img.thumb { width: 80px; height: 80px; object-fit: cover; border: 1px solid #ccc; }
+        form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+        input[type=text], input[type=number], select { padding: 5px; }
+        button { padding: 6px 16px; }
+        .msg { padding: 8px 12px; border: 1px solid; min-height: 1.2em; margin: 1rem 0; }
+        .msg.error { color: #b00020; background: #fdecea; border-color: #f5c2c0; }
+        .msg.ok { color: #1b5e20; background: #e8f5e9; border-color: #b7dfb9; }
+        .msg:empty { display: none; }
+    </style>
+</head>
+<body>
+    <div id="message" class="msg" role="status"></div>
+
+    <h1>Типи конденсаторів</h1>
+    <ul id="typeList"></ul>
+    <form id="typeForm">
+        <input type="text" id="typeName" placeholder="Назва типу" required>
+        <button type="submit">Додати тип</button>
+    </form>
+
+    <h1>Конденсатори</h1>
+    <table>
+        <thead>
+            <tr><th>Фото</th><th>№</th><th>Позначення</th><th>Тип</th><th>Ємність, мкФ</th><th>Напруга, В</th><th>Параметри маркування</th></tr>
+        </thead>
+        <tbody id="capacitorList"></tbody>
+    </table>
+    <form id="capacitorForm">
+        <input type="text" id="capDesignation" placeholder="Позначення (К10-17)" required>
+        <select id="capType" required></select>
+        <input type="number" step="any" min="0" id="capCapacitance" placeholder="Ємність, мкФ" required>
+        <input type="number" step="any" min="0" id="capVoltage" placeholder="Напруга, В" required>
+        <input type="file" id="capPhoto" accept="image/*">
+        <button type="submit">Додати конденсатор</button>
+    </form>
+
+    <h1>Параметри маркування</h1>
+    <form id="parameterForm">
+        <select id="paramCapacitor" required></select>
+        <input type="text" id="paramName" placeholder="Назва параметра" required>
+        <input type="text" id="paramValue" placeholder="Значення" required>
+        <button type="submit">Додати параметр</button>
+    </form>
+
+<script>
+    const API = 'api.php';
+
+    // Екранування: дані з API підставляються в innerHTML, тому спецсимволи треба нейтралізувати
+    function esc(value) {
+        return String(value).replace(/[&<>"']/g, ch => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+    }
+
+    function showMessage(text, kind) {
+        const el = document.getElementById('message');
+        el.textContent = text;
+        el.className = 'msg ' + kind;
+    }
+
+    // Спільна функція: JSON-запит; повертає розібрану відповідь або кидає помилку з текстом від API
+    async function apiRequest(url, options = {}) {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(data.error || `Помилка сервера (${response.status})`);
+        }
+        return data;
+    }
+
+    function postJson(url, payload) {
+        return apiRequest(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+    }
+
+    // ---------- Завантаження й відображення списків ----------
+
+    async function loadTypes() {
+        const types = await apiRequest(`${API}?resource=types`);
+        document.getElementById('typeList').innerHTML =
+            types.map(t => `<li>${esc(t.name)}</li>`).join('');
+        document.getElementById('capType').innerHTML =
+            types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    }
+
+    async function loadCapacitors() {
+        const capacitors = await apiRequest(`${API}?resource=capacitors`);
+        document.getElementById('capacitorList').innerHTML = capacitors.map(c => `
+            <tr>
+                <td>${c.photo ? `<img class="thumb" src="uploads/${esc(c.photo)}" alt="${esc(c.designation)}">` : '—'}</td>
+                <td>${c.id}</td>
+                <td>${esc(c.designation)}</td>
+                <td>${esc(c.type.name)}</td>
+                <td>${c.capacitance}</td>
+                <td>${c.voltage}</td>
+                <td>${esc(c.parameters.map(p => `${p.name}: ${p.value}`).join('; '))}</td>
+            </tr>`).join('');
+        document.getElementById('paramCapacitor').innerHTML =
+            capacitors.map(c => `<option value="${c.id}">#${c.id} ${esc(c.designation)}</option>`).join('');
+    }
+
+    // ---------- Обробники форм ----------
+
+    document.getElementById('typeForm').addEventListener('submit', async (event) => {
+        event.preventDefault();           // без цього браузер перезавантажить сторінку
+        const form = event.target;
+        try {
+            await postJson(`${API}?resource=types`, {
+                name: document.getElementById('typeName').value,
+            });
+            form.reset();
+            showMessage('Тип додано.', 'ok');
+            await loadTypes();
+        } catch (e) { showMessage(e.message, 'error'); }
+    });
+
+    document.getElementById('capacitorForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        try {
+            // Крок 1: створення запису JSON-запитом
+            const capacitor = await postJson(`${API}?resource=capacitors`, {
+                designation: document.getElementById('capDesignation').value,
+                type_id: Number(document.getElementById('capType').value),
+                capacitance: Number(document.getElementById('capCapacitance').value),
+                voltage: Number(document.getElementById('capVoltage').value),
+            });
+
+            // Крок 2: якщо обрано файл — окремий multipart-запит із отриманим id
+            const photoInput = document.getElementById('capPhoto');
+            let photoError = null;
+            if (photoInput.files.length > 0) {
+                const formData = new FormData();
+                formData.append('photo', photoInput.files[0]);
+                try {
+                    // Заголовок Content-Type НЕ задається: браузер виставить його сам разом із boundary
+                    await apiRequest(`${API}?resource=capacitors&action=photo&id=${capacitor.id}`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                } catch (e) { photoError = e.message; }
+            }
+
+            form.reset();
+            await loadCapacitors();
+            if (photoError) {
+                showMessage(`Конденсатор #${capacitor.id} додано, але фото не завантажено: ${photoError}`, 'error');
+            } else {
+                showMessage(`Конденсатор #${capacitor.id} додано.`, 'ok');
+            }
+        } catch (e) { showMessage(e.message, 'error'); }
+    });
+
+    document.getElementById('parameterForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        try {
+            await postJson(`${API}?resource=parameters`, {
+                capacitor_id: Number(document.getElementById('paramCapacitor').value),
+                name: document.getElementById('paramName').value,
+                value: document.getElementById('paramValue').value,
+            });
+            form.reset();
+            showMessage('Параметр додано.', 'ok');
+            await loadCapacitors();
+        } catch (e) { showMessage(e.message, 'error'); }
+    });
+
+    // Початкове завантаження (виконується один раз під час відкриття сторінки)
+    Promise.all([loadTypes(), loadCapacitors()]).catch(e => showMessage(e.message, 'error'));
+</script>
+</body>
+</html>
